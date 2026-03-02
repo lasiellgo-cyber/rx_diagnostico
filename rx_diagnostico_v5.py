@@ -7,10 +7,10 @@ import urllib.request
 from PIL import Image
 import torchxrayvision as xrv
 
-# ── CONFIGURACIÓN CORREGIDA ──
+# ── CONFIGURACIÓN TÉCNICA ──
 DEVICE = "cpu" 
 MODEL_CACHE_PATH = "/tmp/densenet_finetuned.pth"
-# ENLACE CORREGIDO PARA DESCARGA DIRECTA:
+# ENLACE CORREGIDO (Descarga directa)
 HF_MODEL_URL = "https://huggingface.co/LASIELL/rx-modelo/resolve/main/densenet_finetuned.pth?download=true"
 
 CATEGORIAS = [
@@ -28,7 +28,7 @@ def descargar_y_cargar_modelo():
     modelo.classifier = nn.Linear(modelo.classifier.in_features, 14)
     
     tipo = "BASE"
-    # Forzar descarga si el archivo no existe o es demasiado pequeño (error previo)
+    # Forzar descarga limpia
     if not os.path.exists(MODEL_CACHE_PATH) or os.path.getsize(MODEL_CACHE_PATH) < 1000000:
         try:
             urllib.request.urlretrieve(HF_MODEL_URL, MODEL_CACHE_PATH)
@@ -36,11 +36,37 @@ def descargar_y_cargar_modelo():
 
     if os.path.exists(MODEL_CACHE_PATH):
         try:
-            # Cargamos su entrenamiento de 0.11/0.15 loss
             modelo.load_state_dict(torch.load(MODEL_CACHE_PATH, map_location="cpu"), strict=False)
-            tipo = "ENTRENADO (RUBÉN)"
+            tipo = "RUBÉN (ENTRENADO)"
         except Exception: pass
             
     return modelo.eval(), tipo
 
-# ... (El resto de su código v5 de visualización sigue igual)
+# ── INTERFAZ ──
+st.title("🔬 Sistema de Diagnóstico RX")
+modelo, tipo_ia = descargar_y_cargar_modelo()
+
+archivo = st.file_uploader("Cargar imagen RX", type=["jpg","jpeg","png"])
+if archivo:
+    col1, col2 = st.columns(2)
+    img_pil = Image.open(archivo).convert("L")
+    with col1:
+        st.image(img_pil, use_container_width=True)
+        st.caption(f"Modelo activo: {tipo_ia}")
+    
+    with col2:
+        # Procesamiento
+        img = np.array(img_pil)
+        img = xrv.datasets.normalize(img, 255)
+        t = torch.from_numpy(img[None, None, :, :]).float()
+        t = torch.nn.functional.interpolate(t, size=(224, 224))
+        
+        with torch.no_grad():
+            preds = torch.sigmoid(modelo(t)).numpy()[0]
+        
+        st.subheader("Hallazgos:")
+        res = sorted(zip(CATEGORIAS, preds), key=lambda x: -x[1])
+        for cat, prob in res:
+            if prob > 0.25:
+                st.write(f"**{cat}**: {prob*100:.1f}%")
+                st.progress(float(prob))
